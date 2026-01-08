@@ -5,14 +5,14 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # FIX: Install updated system dependencies for OpenCV
-# We use libgl1 and libfribidi0 which are the modern replacements
+# libgl1 is the modern replacement for libgl1-mesa-glx
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
-    libfribidi0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install
+# Note: Ensure requirements.txt is in the same folder as this Dockerfile!
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
