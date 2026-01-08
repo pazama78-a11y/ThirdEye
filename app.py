@@ -33,7 +33,6 @@ REAL_HEIGHTS = {
 
 model = YOLO('yolov8n.pt')
 
-# HTML for the web browser
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -57,7 +56,7 @@ HTML_TEMPLATE = """
         <div style="max-width:600px; margin:auto; margin-top:30px;">
             {% for d in detections %}
                 <div class="item {{ d.status }}">
-                    <strong>{{ d.label }}</strong> - {{ d.pos }} at {{ d.dist }}m
+                    <strong>{{ d.label | upper }}</strong> - {{ d.pos }} at {{ d.dist }}m
                 </div>
             {% endfor %}
         </div>
@@ -76,8 +75,7 @@ def index():
             frame = np.array(img)[:, :, ::-1].copy()
             results = model(frame, verbose=False, conf=0.20)[0]
 
-            # --- PRINTING TO CLOUD LOGS ---
-            print(f"\n--- GLOBAL SAFETY REPORT ---")
+            print(f"\n--- GLOBAL SAFETY REPORT (Detected {len(results.boxes)} objects) ---")
 
             for box in results.boxes:
                 label = model.names[int(box.cls[0])]
@@ -86,6 +84,8 @@ def index():
                 center_x = (x1 + x2) / 2
                 real_h = REAL_HEIGHTS.get(label, 0.6)
                 distance = (real_h * FOCAL_LENGTH) / pixel_h
+                
+                # Your ground-contact perspective correction
                 if y2 > 576: distance *= 0.75
 
                 if distance < 1.3: status = "STOP"
@@ -96,11 +96,14 @@ def index():
                 elif center_x > 427: pos = "to your RIGHT"
                 else: pos = "DIRECTLY AHEAD"
 
-                # This prints to your Google Cloud Logs
+                # THIS PRINTS TO YOUR CLOUD LOGS
                 print(f"[{status}] {label} {pos} at {distance:.1f} meters.")
+                if status == "STOP":
+                    step_dir = "RIGHT" if center_x < 320 else "LEFT"
+                    print(f"   >> ACTION: Obstacle very close! Please step {step_dir}.")
 
                 detections.append({
-                    "label": label.upper(), "dist": round(distance, 1),
+                    "label": label, "dist": round(distance, 1),
                     "status": status, "pos": pos
                 })
 
