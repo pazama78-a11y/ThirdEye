@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 app = Flask(__name__)
 
-# --- YOUR ORIGINAL CONSTANTS ---
+# --- YOUR ORIGINAL CONSTANTS AND MATH ---
 IMAGE_SIZE = 640
 VFOV_DEG = 60
 FOCAL_LENGTH = (IMAGE_SIZE / 2) / np.tan(np.deg2rad(VFOV_DEG / 2))
@@ -33,37 +33,35 @@ REAL_HEIGHTS = {
 
 model = YOLO('yolov8n.pt')
 
-# --- HTML DESIGN (For Web Display) ---
+# HTML for the web browser
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
     <title>Vision Guard AI</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
-        .box { max-width: 500px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 15px; }
-        .item { padding: 10px; margin: 5px; border-radius: 5px; text-align: left; }
-        .STOP { background: #4a1212; border-left: 5px solid red; }
-        .WARNING { background: #4a4112; border-left: 5px solid yellow; }
-        .SAFE { background: #124a12; border-left: 5px solid green; }
+        body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
+        .item { padding: 15px; margin: 10px; border-radius: 10px; text-align: left; border-left: 10px solid; }
+        .STOP { background: #3d0b13; border-color: #ff1744; }
+        .WARNING { background: #3d3b0b; border-color: #ffea00; }
+        .SAFE { background: #0b3d1c; border-color: #00e676; }
     </style>
 </head>
 <body>
-    <div class="box">
-        <h1>Vision Guard AI</h1>
-        <form method="POST" enctype="multipart/form-data">
-            <input type="file" name="image" required><br><br>
-            <button type="submit" style="width:100%; padding:10px;">ANALYZE</button>
-        </form>
-        {% if detections %}
+    <h1>Vision Guard AI</h1>
+    <form method="POST" enctype="multipart/form-data">
+        <input type="file" name="image" required><br><br>
+        <button type="submit" style="padding:10px 20px;">ANALYZE ENVIRONMENT</button>
+    </form>
+    {% if detections %}
+        <div style="max-width:600px; margin:auto; margin-top:30px;">
             {% for d in detections %}
                 <div class="item {{ d.status }}">
                     <strong>{{ d.label }}</strong> - {{ d.pos }} at {{ d.dist }}m
                 </div>
             {% endfor %}
-        {% endif %}
-    </div>
+        </div>
+    {% endif %}
 </body>
 </html>
 """
@@ -74,21 +72,18 @@ def index():
     if request.method == 'POST':
         file = request.files.get('image')
         if file:
-            img = Image.open(file).convert('RGB')
-            img = img.resize((IMAGE_SIZE, IMAGE_SIZE))
+            img = Image.open(file).convert('RGB').resize((IMAGE_SIZE, IMAGE_SIZE))
             frame = np.array(img)[:, :, ::-1].copy()
-
             results = model(frame, verbose=False, conf=0.20)[0]
 
-            # --- PRINTING PROCESS STARTS HERE ---
-            print(f"\n--- GLOBAL SAFETY REPORT (Detected {len(results.boxes)} objects) ---")
+            # --- PRINTING TO CLOUD LOGS ---
+            print(f"\n--- GLOBAL SAFETY REPORT ---")
 
             for box in results.boxes:
                 label = model.names[int(box.cls[0])]
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 pixel_h = y2 - y1
                 center_x = (x1 + x2) / 2
-                
                 real_h = REAL_HEIGHTS.get(label, 0.6)
                 distance = (real_h * FOCAL_LENGTH) / pixel_h
                 if y2 > 576: distance *= 0.75
@@ -101,13 +96,9 @@ def index():
                 elif center_x > 427: pos = "to your RIGHT"
                 else: pos = "DIRECTLY AHEAD"
 
-                # 1. Print to Terminal (The process you were looking for)
+                # This prints to your Google Cloud Logs
                 print(f"[{status}] {label} {pos} at {distance:.1f} meters.")
-                if status == "STOP":
-                    step_dir = "RIGHT" if center_x < 320 else "LEFT"
-                    print(f"   >> ACTION: Immediate obstacle! Please step {step_dir}.")
 
-                # 2. Add to Web Report
                 detections.append({
                     "label": label.upper(), "dist": round(distance, 1),
                     "status": status, "pos": pos
