@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 app = Flask(__name__)
 
-# --- CONSTANTS AND MATH (Identical to your logic) ---
+# --- CONSTANTS AND MATH (Your Original Logic) ---
 IMAGE_SIZE = 640
 VFOV_DEG = 60
 FOCAL_LENGTH = (IMAGE_SIZE / 2) / np.tan(np.deg2rad(VFOV_DEG / 2))
@@ -31,58 +31,56 @@ REAL_HEIGHTS = {
     "door": 2.05, "window": 1.20, "stairs": 1.00, "elevator": 2.20
 }
 
-# Load YOLO model
+# Pre-load model (YOLOv8 Nano is best for Cloud Run memory limits)
 model = YOLO('yolov8n.pt')
 
-# --- CLEANED HTML TEMPLATE ---
+# --- USER INTERFACE (Cleaned & Corrected) ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vision Guard AI</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
-        .container { max-width: 600px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        .upload-box { border: 2px dashed #444; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        input[type="file"] { margin: 15px 0; }
-        button { background: #00e676; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; color: #121212; width: 100%; font-size: 16px; }
-        button:hover { background: #00c853; }
-        .results-container { margin-top: 30px; text-align: left; }
-        .item { padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 8px solid; }
-        .STOP { background: #3d0b13; border-color: #ff1744; }
-        .WARNING { background: #3d3b0b; border-color: #ffea00; color: #fff; }
+        body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
+        .card { max-width: 500px; margin: auto; background: #1e1e1e; padding: 25px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }
+        .btn { background: #00e676; border: none; padding: 15px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; }
+        .item { text-align: left; padding: 15px; margin: 15px 0; border-radius: 8px; border-left: 10px solid; }
+        .STOP { background: #421212; border-color: #ff1744; }
+        .WARNING { background: #3d3b0b; border-color: #ffea00; }
         .SAFE { background: #0b3d1c; border-color: #00e676; }
-        .action-alert { font-weight: bold; display: block; margin-top: 10px; color: #ff1744; border-top: 1px solid rgba(255,23,68,0.3); padding-top: 5px; }
+        .voice-btn { background: #2196f3; color: white; margin-top: 10px; }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="card">
         <h1>Vision Guard AI</h1>
-        <p>Assistant for the Visually Impaired</p>
-        
-        <div class="upload-box">
-            <form method="POST" enctype="multipart/form-data">
-                <input type="file" name="image" accept="image/*" required><br>
-                <button type="submit">ANALYZE ENVIRONMENT</button>
-            </form>
-        </div>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="image" accept="image/*" required>
+            <button type="submit" class="btn">ANALYZE ENVIRONMENT</button>
+        </form>
 
         {% if detections %}
-            <div class="results-container">
-                <h2 style="text-align: center;">Safety Report</h2>
+            <button onclick="readReport()" class="btn voice-btn">🔊 READ REPORT OUT LOUD</button>
+            <div id="results">
                 {% for d in detections %}
                     <div class="item {{ d.status }}">
-                        <strong>{{ d.label | upper }}</strong> — {{ d.pos }}<br>
-                        Distance: {{ d.dist }} meters
-                        {% if d.status == "STOP" %}
-                            <span class="action-alert">⚠️ ACTION: Step {{ d.step_dir }} immediately!</span>
-                        {% endif %}
+                        <strong>{{ d.label | upper }}</strong> - {{ d.pos }}<br>
+                        Distance: {{ d.dist }}m | Status: {{ d.status }}
+                        {% if d.status == "STOP" %}<br><span style="color:red">⚠️ ACTION: Step {{ d.step_dir }}!</span>{% endif %}
                     </div>
                 {% endfor %}
             </div>
+            <script>
+                function readReport() {
+                    const text = "{{ speech_text }}";
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    window.speechSynthesis.speak(utterance);
+                }
+            </script>
         {% elif analyzed %}
-            <p style="color: #00e676;">No objects detected. The path is clear.</p>
+            <p style="color: #00e676; margin-top:20px;">The path ahead is clear.</p>
         {% endif %}
     </div>
 </body>
@@ -92,18 +90,16 @@ HTML_TEMPLATE = """
 @app.route('/', methods=['GET', 'POST'])
 def index():
     detections = []
+    speech_text = "Analysis complete. "
     analyzed = False
-    
+
     if request.method == 'POST':
         file = request.files.get('image')
         if file:
             analyzed = True
-            # Image Processing
             img = Image.open(file).convert('RGB').resize((IMAGE_SIZE, IMAGE_SIZE))
             frame = np.array(img)[:, :, ::-1].copy()
-            results = model(frame, verbose=False, conf=0.20)[0]
-
-            print(f"\n--- GLOBAL SAFETY REPORT (Detected {len(results.boxes)} objects) ---")
+            results = model(frame, verbose=False, conf=0.25)[0]
 
             for box in results.boxes:
                 label = model.names[int(box.cls[0])]
@@ -111,39 +107,34 @@ def index():
                 pixel_h = y2 - y1
                 center_x = (x1 + x2) / 2
                 real_h = REAL_HEIGHTS.get(label, 0.6)
-                
-                # Math Logic
-                distance = (real_h * FOCAL_LENGTH) / pixel_h
-                if y2 > 576: distance *= 0.75
 
-                # Safety Status
+                distance = (real_h * FOCAL_LENGTH) / pixel_h
+                if y2 > 576: distance *= 0.75 # Your ground bias
+
                 if distance < 1.3: status = "STOP"
                 elif 1.3 <= distance <= 4.0: status = "WARNING"
                 else: status = "SAFE"
 
-                # Positioning
-                if center_x < 213: pos = "to your LEFT"
-                elif center_x > 427: pos = "to your RIGHT"
-                else: pos = "DIRECTLY AHEAD"
+                if center_x < 213: pos = "to your left"
+                elif center_x > 427: pos = "to your right"
+                else: pos = "directly ahead"
 
                 step_dir = "RIGHT" if center_x < 320 else "LEFT"
 
-                # Log to Cloud Console
-                print(f"[{status}] {label} {pos} at {distance:.1f} meters.")
-
                 detections.append({
-                    "label": label,
-                    "dist": round(distance, 1),
-                    "status": status,
-                    "pos": pos,
-                    "step_dir": step_dir
+                    "label": label, "dist": round(distance, 1),
+                    "status": status, "pos": pos, "step_dir": step_dir
                 })
+                
+                speech_text += f"{label} detected {pos} at {round(distance, 1)} meters. "
+                if status == "STOP": speech_text += f"Immediate stop required! Step {step_dir}. "
 
-            # Sort by distance
             detections.sort(key=lambda x: x['dist'])
 
-    return render_template_string(HTML_TEMPLATE, detections=detections, analyzed=analyzed)
+    return render_template_string(HTML_TEMPLATE, detections=detections, speech_text=speech_text, analyzed=analyzed)
 
 if __name__ == '__main__':
+    # Google Cloud Run provides the PORT environment variable. 
+    # If it's missing (local testing), it defaults to 8080.
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
